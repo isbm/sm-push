@@ -136,7 +136,7 @@ class SSH:
         """
         Deploy SSH identity on the remote node.
         """
-        idpath = "/home/%s/.ssh/id_rsa.pub" % getpass.getuser()
+        idpath = "%s/.ssh/id_rsa.pub" % os.path.expanduser('~' + getpass.getuser())
 
         if self.verbose:
             print >> sys.stderr, "Deploying SSH key %s" % idpath
@@ -195,12 +195,13 @@ class PushEnvironment:
             else:
                 raise Exception("You want it quiet, but I need remote password for \"%s\"!" % getpass.getuser())
             self.deploy_keychain()
-        
+            target_machine = self.verify_keychain()
+
         target_machine = filter(None, target_machine.split(' '))
         if len(target_machine) == 2:
             self.target_os, self.target_arch = target_machine
         else:
-            raise Exception("Unknown platform: " + target_machine)
+            raise Exception("Unknown platform: " + self.target_os)
 
         if not 'quiet' in self.params.keys():
             RuntimeUtils.info('Target machine "%s" prepared.' % self.target_host)
@@ -569,6 +570,18 @@ class RuntimeUtils:
 
 
     @classmethod
+    def required_params(self):
+        """
+        Returns True or False if required params has been passed.
+        """
+        params = RuntimeUtils.get_params()
+        if 'hostname' in params.keys():
+            for p in ['activation-keys', 'command', 'tunneling']:
+                if p in params.keys():
+                    return True
+
+
+    @classmethod
     def error(self, msg, output=sys.stdout):
         print >> output, "ERROR:\t\t%s" % msg
         output.flush()
@@ -596,7 +609,7 @@ class RuntimeUtils:
 # Main app
 if __name__ == "__main__":
     params = RuntimeUtils.get_params()
-    if not params or 'help' in params.keys():
+    if not RuntimeUtils.required_params() or 'help' in params.keys():
         RuntimeUtils.header()
         RuntimeUtils.usage()
     else:
