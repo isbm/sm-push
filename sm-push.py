@@ -45,6 +45,43 @@ import random
 import hashlib
 import getpass
 import tempfile
+from xml.dom import minidom
+
+
+class SMClientOutput:
+    """
+    Parse SM Client output.
+    """
+    SUCCESS = 'success'
+    WARNING = 'warning'
+    ERROR = 'error'
+
+    def __init__(self, output):
+        """
+        Get output from the SM Client.
+        """
+        self.events = {
+            self.SUCCESS : [],
+            self.WARNING : [],
+            self.ERROR : [],
+        }
+
+        chop = False
+        xmldoc = []
+        for line in (output != None and output.strip() or "").split("\n"):
+            if line.startswith('<?xml '):
+                chop = True
+
+            if chop:
+                xmldoc.append(line.strip())
+
+        xmldoc = minidom.parseString('\n'.join(xmldoc))
+        for node in xmldoc.getElementsByTagName("message"):
+            if not node.attributes or not node.attributes.get("type"):
+                # Broken remote XML here. How to cry in a proper way?
+                continue
+            for cnode in node.childNodes:
+                self.events[node.attributes.get("type") and node.attributes.get("type").value or "unknown"].append(cnode.nodeValue)
 
 
 
@@ -334,14 +371,21 @@ class TaskPush:
         Run the task on the target system.
         """
 
+        # Execute some command, if any
         if self.params.get('command'):
             self._do_command()
 
+        # Enable or disable tunneling
         if 'tunneling' in self.params.keys():
             if self.params.get('tunneling') in ['yes', 'no']:
                 self._do_tunneling()
             else:
                 raise Exception('What means "%s" in context of tunneling?' % self.params.get('tunneling'))
+
+        # Register, if requested
+        if 'activation-keys' in self.params.keys():
+            self._do_register_at_sm(force=('override' in self.params.keys()))
+        
 
 
     # Performing tasks
@@ -349,18 +393,47 @@ class TaskPush:
         """
         Register remote node at SUSE Manager.
         """
+        ssl_certificate = "/srv/www/htdocs/pub/RHN-ORG-TRUSTED-SSL-CERT" # Point of configuration in a future.
         if self.environ.target_os.lower() == 'linux':
-            remote_pkg_pth = '/tmp/sm-client-tools.%s.%s.rpm' % (time.time(), random.randint(0xff, 0xffff)) # Temporary unique (hopefully) name on remote filesystem.
-            local_pkg_pth = "/srv/www/htdocs/pub/bootstrap/sm-client-tools.rpm"
-            if not os.path.exists(local_pkg_pth):
-                raise Exception('SUSE Manager Client package does not exists.')
+            # Register remote against SUSE Manager
+            if self.ssh.execute("rpm -qa | grep sm-client-tools || echo 'absent'") == 'absent':
+                RuntimeUtils.info('Installing SM Client on target machine')
+                remote_pkg_pth = '/tmp/sm-client-tools.%s.%s.rpm' % (time.time(), random.randint(0xff, 0xffff)) # Temporary unique (hopefully) name on remote filesystem.
+                local_pkg_pth = "/srv/www/htdocs/pub/bootstrap/sm-client-tools.rpm"
+                if not os.path.exists(local_pkg_pth):
+                    raise Exception('SUSE Manager Client package does not exists.')
+                self.ssh.push_file(local_pkg_pth, remote_pkg_pth)
+                self.ssh.execute('/bin/rpm -ivh %s; rm %s' % (remote_pkg_pth, remote_pkg_pth))
+                if self.ssh.execute('test -e /usr/bin/sm-client && echo "installed" || echo "failed"') == 'failed':
+                    raise Exception("SM Client installation failed. :-(")
+                else:
+                    RuntimeUtils.info("SM Client has been installed")
+            else:
+                RuntimeUtils.info('SM Client is already installed')
 
-            # Push SM-Client package
-            print "###", self.ssh.push_file(local_pkg_pth, remote_pkg_pth)
-            
+            # Get SSL certificate fingerprint
+            ssl_fp = os.popen("/usr/bin/openssl x509 -noout -in %s -fingerprint" % ssl_certificate).read().split('=')[-1].strip()
+            if not 'quiet' in self.params.keys():
+                remote_tmp_logfile = '/tmp/.sm-client-tools.%s.%s.log' % (time.strftime('%Y%m%d.%H%M%S.backup', time.localtime()), random.randint(0xff, 0xffff))
+                RuntimeUtils.info("SSL certificate: %s" % ssl_fp)
+                self.ssh.execute("/usr/bin/sudo -n /usr/bin/sm-client --output-format=xml --hostname=%s --activation-keys=%s --ssl-fingerprint=%s > %s" %
+                                 (self.localhostname, self.params['activation-keys'], ssl_fp, remote_tmp_logfile))
+                smc_out = SMClientOutput(self.ssh.execute("test -e %s && /bin/cat %s && rm %s || echo '<?xml version=\"1.0\" encoding=\"UTF-8\"?><log/>'" % 
+                                                          (remote_tmp_logfile, remote_tmp_logfile, remote_tmp_logfile)))
+            if smc_out.events.get(SMClientOutput.ERROR):
+                RuntimeUtils.error("Remote machine was not happy:")
+                for error_message in smc_out.events.get(SMClientOutput.ERROR):
+                    RuntimeUtils.error(error_message)
+                raise Exception("Registration failed. Please login to the %s and find out why." % self.hostname)
+            elif smc_out.events.get(SMClientOutput.WARNING):
+                for warning_message in smc_out.events.get(SMClientOutput.WARNING):
+                    RuntimeUtils.warning(self.hostname + ": " + warning_message)
+            # No success blah-blah-blah here.
         else:
             # Solaris fans, do it yourself. :-)
             raise Exception('I cannot register %s against SUSE Manager as of today.')
+
+        RuntimeUtils.info("Remote machine %s has been registered successfully." % self.hostname)
 
 
     def _do_tunneling(self):
@@ -437,7 +510,7 @@ class TaskPush:
         if res:
             RuntimeUtils.error(res)
             self._cleanup(tmppth)
-            #raise Exception('Remote node error.')
+            raise Exception('Remote node error.')
 
         # Restart DNS cache
         self._restart_dns_cache()
@@ -495,7 +568,6 @@ class TaskPush:
         if not 'quiet' in self.params.keys():
             RuntimeUtils.info('Executing command: "' + self.params.get('command') + '"')
             RuntimeUtils.info('Remote response below as follows:')
-        #response = SSH(self.hostname, None, user=getpass.getuser(), port=self.params.get('ssh-port', '22')).execute(self.params.get('command'))
         response = self.ssh.execute(self.params.get('command'))
 
         if not 'quiet' in self.params.keys():
