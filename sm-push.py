@@ -54,7 +54,7 @@ class SMClientOutput:
     """
     SUCCESS = 'success'
     WARNING = 'warning'
-    ERROR = 'error'
+    ERROR = 'failure'
 
     def __init__(self, output):
         """
@@ -336,6 +336,7 @@ class TaskPush:
         self.ssh = None
         self.environ = None
         self.tunnel = None
+        self.is_tunnel_enabled = None
 
 
     def _get_hostname(self, hostname):
@@ -393,6 +394,11 @@ class TaskPush:
         """
         Register remote node at SUSE Manager.
         """
+        # User is not asking to setup tunnel, so let's check if it is around
+        if self.is_tunnel_enabled == None:
+            self._do_tunneling(check_only=True)
+        RuntimeUtils.info("Tunnel is %s." % (self.is_tunnel_enabled and 'enabled' or 'disabled'))
+
         ssl_certificate = "/srv/www/htdocs/pub/RHN-ORG-TRUSTED-SSL-CERT" # Point of configuration in a future.
         if self.environ.target_os.lower() == 'linux':
             # Register remote against SUSE Manager
@@ -421,7 +427,7 @@ class TaskPush:
                 smc_out = SMClientOutput(self.ssh.execute("test -e %s && /bin/cat %s && rm %s || echo '<?xml version=\"1.0\" encoding=\"UTF-8\"?><log/>'" % 
                                                           (remote_tmp_logfile, remote_tmp_logfile, remote_tmp_logfile)))
             if smc_out.events.get(SMClientOutput.ERROR):
-                RuntimeUtils.error("Remote machine was not happy:")
+                RuntimeUtils.warning("Remote machine was not happy:")
                 for error_message in smc_out.events.get(SMClientOutput.ERROR):
                     RuntimeUtils.error(error_message)
                 raise Exception("Registration failed. Please login to the %s and find out why." % self.hostname)
@@ -436,40 +442,42 @@ class TaskPush:
         RuntimeUtils.info("Remote machine %s has been registered successfully." % self.hostname)
 
 
-    def _do_tunneling(self):
+    def _do_tunneling(self, check_only=False):
         """
         Enable or disable tunnel.
         """
         if not self.ssh:
             raise Exception("SSH link was not initialized.")
 
-        enable = self.params.get('tunneling', '') == 'yes'
-        RuntimeUtils.info('%s tunneling on %s node.' % ((enable and 'Enabling' or 'Disabling'), self.hostname))
-
         # Get content of the /etc/hosts on the remote machine
         random.seed()
         token = '# __%s.%s__' % (time.time(), random.randint(0xff, 0xffff))
         etc_hosts = self.ssh.execute("test -e /etc/hosts && cat /etc/hosts || echo '%s'" % token) + ""
 
-        is_enabled = False
+        self.is_tunnel_enabled = False
         if etc_hosts.find(token) > -1:
             raise Exception('Tunneling cannot be enabled on this system.')
         else:
             for line in map(lambda item:item.strip().lower(), etc_hosts.split("\n")):
                 if not line.startswith('#') and line.find(self.localhostname) > -1:
-                    is_enabled = True
+                    self.is_tunnel_enabled = True
                     break
 
+        if check_only:
+            return
+
         # Skip procedure if nothing needed to do.
+        enable = self.params.get('tunneling', '') == 'yes'
+        RuntimeUtils.info('%s tunneling on %s node.' % ((enable and 'Enabling' or 'Disabling'), self.hostname))
         if enable:
-            if is_enabled:
+            if self.is_tunnel_enabled:
                 RuntimeUtils.warning('Tunelling on the node "%s" is already enabled.' % self.hostname)
                 return
         else:
-            if not is_enabled:
+            if not self.is_tunnel_enabled:
                 RuntimeUtils.warning('Tunelling on the node "%s" is already disabled.' % self.hostname)
                 return
-
+        self.is_tunnel_enabled = enable
         hosts = []
         for line in etc_hosts.split("\n"):
             if not line.strip().startswith('#'):
