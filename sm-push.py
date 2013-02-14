@@ -99,6 +99,17 @@ class SSH:
         self.user = user
         self.port = port
         self.verbose = verbose
+        self.tunneling = []
+
+
+    def set_tunneling(self, settings):
+        """
+        Set tunneling mode with settings of the following format:
+        [(source_port, destination_port, hostname,),]
+        """
+        self.tunneling = []
+        for src_port, dst_port, hostname in settings:
+            self.tunneling.append("-R %s:%s:%s" % (src_port, hostname, dst_port))
 
 
     def _read(self, input):
@@ -107,11 +118,11 @@ class SSH:
         """
         out = ''
         try:
-            out = os.read(input, 1024)
+            out = os.read(input, 0x400)
             if self.verbose and str(out).strip():
                 print >> sys.stderr, "INPUT>", out.strip()
         except Exception, e:
-            # Suppress IO fail.
+            # Always suppress IO fail here.
             pass
 
         return out
@@ -151,8 +162,11 @@ class SSH:
         """
         (pid, f) = pty.fork()
         if pid == 0:
-            os.execlp("ssh", "ssh", '-o NumberOfPasswordPrompts=1',
-                      '-p %s' % self.port, self.user + '@' + self.hostname, c)
+            #os.execlp("ssh", "ssh", '-o NumberOfPasswordPrompts=1',
+            #          '-p %s' % self.port, self.user + '@' + self.hostname, c)
+            cmd = ['ssh', '-o NumberOfPasswordPrompts=1', 
+                   '-p %s' % self.port, self.user + '@' + self.hostname, c,]
+            os.execlp("ssh", *(cmd[:1] + self.tunneling + cmd[1:]))
         else:
             return self._results(pid, f)
 
@@ -371,22 +385,27 @@ class TaskPush:
         """
         Run the task on the target system.
         """
-
-        # Execute some command, if any
-        if self.params.get('command'):
-            self._do_command()
-
         # Enable or disable tunneling
         if 'tunneling' in self.params.keys():
             if self.params.get('tunneling') in ['yes', 'no']:
                 self._do_tunneling()
             else:
                 raise Exception('What means "%s" in context of tunneling?' % self.params.get('tunneling'))
+        else:
+            # Check if tunneling is on the remote, since user is not asking for it.
+            if self.is_tunnel_enabled == None:
+                self._do_tunneling(check_only=True)
+            RuntimeUtils.info("Tunnel is %s." % (self.is_tunnel_enabled and 'enabled' or 'disabled'))
 
         # Register, if requested
         if 'activation-keys' in self.params.keys():
             self._do_register_at_sm(force=('override' in self.params.keys()))
         
+
+        # Execute some command, if any
+        if self.params.get('command'):
+            self._do_command()
+
 
 
     # Performing tasks
@@ -394,11 +413,6 @@ class TaskPush:
         """
         Register remote node at SUSE Manager.
         """
-        # User is not asking to setup tunnel, so let's check if it is around
-        if self.is_tunnel_enabled == None:
-            self._do_tunneling(check_only=True)
-        RuntimeUtils.info("Tunnel is %s." % (self.is_tunnel_enabled and 'enabled' or 'disabled'))
-
         ssl_certificate = "/srv/www/htdocs/pub/RHN-ORG-TRUSTED-SSL-CERT" # Point of configuration in a future.
         if self.environ.target_os.lower() == 'linux':
             # Register remote against SUSE Manager
@@ -422,8 +436,15 @@ class TaskPush:
             if not 'quiet' in self.params.keys():
                 remote_tmp_logfile = '/tmp/.sm-client-tools.%s.%s.log' % (time.strftime('%Y%m%d.%H%M%S.backup', time.localtime()), random.randint(0xff, 0xffff))
                 RuntimeUtils.info("SSL certificate: %s" % ssl_fp)
-                self.ssh.execute("/usr/bin/sudo -n /usr/bin/sm-client --output-format=xml --hostname=%s --activation-keys=%s --ssl-fingerprint=%s > %s" %
-                                 (self.localhostname, self.params['activation-keys'], ssl_fp, remote_tmp_logfile))
+
+                # Register machine
+                overrides = []
+                if self.is_tunnel_enabled:
+                    overrides.append('--cfg=noSSLServerURL,http://%s:%s/' % (self.localhostname, self.tunnel.http_port))
+                    overrides.append('--cfg=serverURL,https://%s:%s/XMLRPC' % (self.localhostname, self.tunnel.https_port))
+                print overrides
+                print self.ssh.execute("/usr/bin/sudo -n /usr/bin/sm-client --output-format=xml --hostname=%s --activation-keys=%s --ssl-fingerprint=%s %s > %s" %
+                                 (self.localhostname, self.params['activation-keys'], ssl_fp, ' '.join(overrides), remote_tmp_logfile))
                 smc_out = SMClientOutput(self.ssh.execute("test -e %s && /bin/cat %s && rm %s || echo '<?xml version=\"1.0\" encoding=\"UTF-8\"?><log/>'" % 
                                                           (remote_tmp_logfile, remote_tmp_logfile, remote_tmp_logfile)))
             if smc_out.events.get(SMClientOutput.ERROR):
@@ -463,6 +484,12 @@ class TaskPush:
                     self.is_tunnel_enabled = True
                     break
 
+        # Setup SSH if tunneling around
+        if self.is_tunnel_enabled:
+            self.ssh.set_tunneling(((self.tunnel.http_port, 80, self.localhostname),
+                                    (self.tunnel.https_port, 443, self.localhostname),))
+
+        # Exit if this is only check/setup
         if check_only:
             return
 
@@ -501,6 +528,7 @@ class TaskPush:
         self.ssh.push_file(tmppth, remote_hosts_pth)
 
         # Push failed?
+        print repr((self.ssh.execute("test -e %s && echo 'OK' || echo '%s'" % (remote_hosts_pth, token)) + "").strip())
         if (self.ssh.execute("test -e %s && echo 'OK' || echo '%s'" % (remote_hosts_pth, token)) + "").strip() != 'OK':
             raise Exception('Unable to send new configuration to "%s" node.' % self.hostname)
 
