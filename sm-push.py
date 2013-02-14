@@ -162,8 +162,6 @@ class SSH:
         """
         (pid, f) = pty.fork()
         if pid == 0:
-            #os.execlp("ssh", "ssh", '-o NumberOfPasswordPrompts=1',
-            #          '-p %s' % self.port, self.user + '@' + self.hostname, c)
             cmd = ['ssh', '-o NumberOfPasswordPrompts=1', 
                    '-p %s' % self.port, self.user + '@' + self.hostname, c,]
             os.execlp("ssh", *(cmd[:1] + self.tunneling + cmd[1:]))
@@ -442,7 +440,6 @@ class TaskPush:
                 if self.is_tunnel_enabled:
                     overrides.append('--cfg=noSSLServerURL,http://%s:%s/' % (self.localhostname, self.tunnel.http_port))
                     overrides.append('--cfg=serverURL,https://%s:%s/XMLRPC' % (self.localhostname, self.tunnel.https_port))
-                print overrides
                 print self.ssh.execute("/usr/bin/sudo -n /usr/bin/sm-client --output-format=xml --hostname=%s --activation-keys=%s --ssl-fingerprint=%s %s > %s" %
                                  (self.localhostname, self.params['activation-keys'], ssl_fp, ' '.join(overrides), remote_tmp_logfile))
                 smc_out = SMClientOutput(self.ssh.execute("test -e %s && /bin/cat %s && rm %s || echo '<?xml version=\"1.0\" encoding=\"UTF-8\"?><log/>'" % 
