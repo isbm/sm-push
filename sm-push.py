@@ -233,14 +233,14 @@ class PushEnvironment:
         # SSH keys around?
         key_fp = self.verify_id_rsa()
         if key_fp and not 'quiet' in self.params.keys():
-            RuntimeUtils.info('New RSA key for SSH generated.')
-            RuntimeUtils.info('Fingerprint: ' + key_fp)
+            RuntimeUtils.info('New RSA key for SSH generated.', format=self.params.get('output-format', 'text'))
+            RuntimeUtils.info('Fingerprint: ' + key_fp, format=self.params.get('output-format', 'text'))
 
         # Public keys on target?
         target_machine = self.verify_keychain()
         if not target_machine:
             if not 'quiet' in self.params.keys():
-                RuntimeUtils.info('No public key deployed on target machine.')
+                RuntimeUtils.info('No public key deployed on target machine.', format=self.params.get('output-format', 'text'))
             else:
                 raise Exception("You want it quiet, but I need remote password for \"%s\"!" % getpass.getuser())
             self.deploy_keychain()
@@ -253,7 +253,7 @@ class PushEnvironment:
             raise Exception("Unknown platform: " + self.target_os)
 
         if not 'quiet' in self.params.keys():
-            RuntimeUtils.info('Target machine "%s" prepared.' % self.target_host)
+            RuntimeUtils.info('Target machine "%s" prepared.' % self.target_host, format=self.params.get('output-format', 'text'))
 
 
     def deploy_keychain(self):
@@ -395,7 +395,7 @@ class TaskPush:
             if self.is_tunnel_enabled == None:
                 self._do_tunneling(check_only=True)
             if 'quiet' not in self.params.keys():
-                RuntimeUtils.info("Tunnel is %s." % (self.is_tunnel_enabled and 'enabled' or 'disabled'))
+                RuntimeUtils.info("Tunnel is %s." % (self.is_tunnel_enabled and 'enabled' or 'disabled'), format=self.params.get('output-format', 'text'))
 
         # Register, if requested
         if 'activation-keys' in self.params.keys():
@@ -417,7 +417,7 @@ class TaskPush:
         if self.environ.target_os.lower() == 'linux':
             # Register remote against SUSE Manager
             if self.ssh.execute("rpm -qa | grep sm-client-tools || echo 'absent'") == 'absent':
-                RuntimeUtils.info('Installing SM Client on target machine')
+                RuntimeUtils.info('Installing SM Client on target machine', format=self.params.get('output-format', 'text'))
                 remote_pkg_pth = '/tmp/sm-client-tools.%s.%s.rpm' % (time.time(), random.randint(0xff, 0xffff)) # Temporary unique (hopefully) name on remote filesystem.
                 local_pkg_pth = "/srv/www/htdocs/pub/bootstrap/sm-client-tools.rpm"
                 if not os.path.exists(local_pkg_pth):
@@ -428,15 +428,15 @@ class TaskPush:
                     raise Exception("SM Client installation failed. :-(")
                 else:
                     if 'quiet' not in self.params.keys():
-                        RuntimeUtils.info("SM Client has been installed")
+                        RuntimeUtils.info("SM Client has been installed", format=self.params.get('output-format', 'text'))
             else:
                 if 'quiet' not in self.params.keys():
-                    RuntimeUtils.info('SM Client is already installed')
+                    RuntimeUtils.info('SM Client is already installed', format=self.params.get('output-format', 'text'))
 
             # Get SSL certificate fingerprint
             ssl_fp = os.popen("/usr/bin/openssl x509 -noout -in %s -fingerprint" % ssl_certificate).read().split('=')[-1].strip()
             if not 'quiet' in self.params.keys():
-                RuntimeUtils.info("SSL certificate: %s" % ssl_fp)
+                RuntimeUtils.info("SSL certificate: %s" % ssl_fp, format=self.params.get('output-format', 'text'))
 
             # If we need sudo, we need to know it is there and we have right permissions
             if getpass.getuser() != 'root':
@@ -456,20 +456,20 @@ class TaskPush:
             smc_out = SMClientOutput(self.ssh.execute("test -e %s && /bin/cat %s && rm %s || echo '<?xml version=\"1.0\" encoding=\"UTF-8\"?><log/>'" % 
                                                       (remote_tmp_logfile, remote_tmp_logfile, remote_tmp_logfile)))
             if smc_out.events.get(SMClientOutput.ERROR):
-                RuntimeUtils.warning("Remote machine was not happy:")
+                RuntimeUtils.warning("Remote machine was not happy:", format=self.params.get('output-format', 'text'))
                 for error_message in smc_out.events.get(SMClientOutput.ERROR):
-                    RuntimeUtils.error(error_message)
+                    RuntimeUtils.error(error_message, format=self.params.get('output-format', 'text'))
                 raise Exception("Registration failed. Please login to the %s and find out why." % self.hostname)
             elif smc_out.events.get(SMClientOutput.WARNING) and not 'quiet' in self.params.keys():
                 for warning_message in smc_out.events.get(SMClientOutput.WARNING):
-                    RuntimeUtils.warning(self.hostname + ": " + warning_message)
+                    RuntimeUtils.warning(self.hostname + ": " + warning_message, format=self.params.get('output-format', 'text'))
             # No success blah-blah-blah here.
         else:
             # Solaris fans, do it yourself. :-)
             raise Exception('I cannot register %s against SUSE Manager as of today.')
 
         if 'quiet' not in self.params.keys():
-            RuntimeUtils.info("Remote machine %s has been registered successfully." % self.hostname)
+            RuntimeUtils.info("Remote machine %s has been registered successfully." % self.hostname, format=self.params.get('output-format', 'text'))
 
 
     def _do_tunneling(self, check_only=False):
@@ -504,14 +504,17 @@ class TaskPush:
 
         # Skip procedure if nothing needed to do.
         enable = self.params.get('tunneling', '') == 'yes'
-        RuntimeUtils.info('%s tunneling on %s node.' % ((enable and 'Enabling' or 'Disabling'), self.hostname))
+        RuntimeUtils.info('%s tunneling on %s node.' % ((enable and 'Enabling' or 'Disabling'), self.hostname),
+                          format=self.params.get('output-format', 'text'))
         if enable:
             if self.is_tunnel_enabled:
-                RuntimeUtils.warning('Tunelling on the node "%s" is already enabled.' % self.hostname)
+                RuntimeUtils.warning('Tunelling on the node "%s" is already enabled.' % self.hostname,
+                                     format=self.params.get('output-format', 'text'))
                 return
         else:
             if not self.is_tunnel_enabled:
-                RuntimeUtils.warning('Tunelling on the node "%s" is already disabled.' % self.hostname)
+                RuntimeUtils.warning('Tunelling on the node "%s" is already disabled.' % self.hostname,
+                                     format=self.params.get('output-format', 'text'))
                 return
         self.is_tunnel_enabled = enable
         hosts = []
@@ -545,14 +548,15 @@ class TaskPush:
             backup_suffix = time.strftime('%Y%m%d.%H%M%S.backup', time.localtime())
             res = self.ssh.execute('mv /etc/hosts /etc/hosts.%s' % backup_suffix)
             if res:
-                RuntimeUtils.error(res)
+                RuntimeUtils.error(res, format=self.params.get('output-format', 'text'))
                 self._cleanup(tmppth)
                 raise Exception('Remote node error.')
             if not 'quiet' in self.params.keys():
-                RuntimeUtils.info('Previous file "/etc/hosts" has been saved as "/etc/hosts.%s"' % backup_suffix)
+                RuntimeUtils.info('Previous file "/etc/hosts" has been saved as "/etc/hosts.%s"' % backup_suffix,
+                                  format=self.params.get('output-format', 'text'))
         res = self.ssh.execute('mv %s /etc/hosts; chmod 0644 /etc/hosts' % remote_hosts_pth)
         if res:
-            RuntimeUtils.error(res)
+            RuntimeUtils.error(res, format=self.params.get('output-format', 'text'))
             self._cleanup(tmppth)
             raise Exception('Remote node error.')
 
@@ -571,9 +575,11 @@ class TaskPush:
             for service_name, service_exec in [('OSAD client-side', '/etc/init.d/osad'),
                                                ('Red Hat Network update query', '/etc/init.d/rhnsd'),]:
                 if self.ssh.execute('test -e %s && %s %s || echo "absent"' %(service_exec, service_exec, (enable and 'start' or 'stop'))) != 'absent':
-                    RuntimeUtils.info('%s %s service' % ((enable and 'Enabling' or 'Stopping'), service_name))
+                    RuntimeUtils.info('%s %s service' % ((enable and 'Enabling' or 'Stopping'), service_name),
+                                      format=self.params.get('output-format', 'text'))
         else:
-            RuntimeUtils.warning('Additional service operations are not supported for %s on %s.' % (self.environ.target_os, self.environ.target_arch))
+            RuntimeUtils.warning('Additional service operations are not supported for %s on %s.' % (self.environ.target_os, self.environ.target_arch),
+                                 format=self.params.get('output-format', 'text'))
             
 
     def _restart_dns_cache(self):
@@ -583,10 +589,12 @@ class TaskPush:
         """
         if self.environ.target_os.lower() == 'linux':
             if self.ssh.execute("test -e /etc/init.d/nscd && echo 'exists' || echo 'absent'") == 'exists':
-                RuntimeUtils.info('Restarting name service cache daemon on remote node.')
+                RuntimeUtils.info('Restarting name service cache daemon on remote node.',
+                                  format=self.params.get('output-format', 'text'))
                 self.ssh.execute('/etc/init.d/nscd')
         else:
-            RuntimeUtils.warning('DNS cache operations are not supported for %s on %s.' % (self.environ.target_os, self.environ.target_arch))
+            RuntimeUtils.warning('DNS cache operations are not supported for %s on %s.' % (self.environ.target_os, self.environ.target_arch),
+                                 format=self.params.get('output-format', 'text'))
 
 
     def _cleanup(self, *fpth):
@@ -598,8 +606,9 @@ class TaskPush:
                 try:
                     os.unlink(fp)
                 except Exception, ex:
-                    RuntimeUtils.warning('Could not remove local temporary file "%s"' % fp)
-                    RuntimeUtils.error(str(ex))
+                    RuntimeUtils.warning('Could not remove local temporary file "%s"' % fp,
+                                         format=self.params.get('output-format', 'text'))
+                    RuntimeUtils.error(str(ex), format=self.params.get('output-format', 'text'))
 
 
     def _do_command(self):
@@ -610,16 +619,24 @@ class TaskPush:
             raise Exception("SSH link was not initialized.")
 
         if not 'quiet' in self.params.keys():
-            RuntimeUtils.info('Executing command: "' + self.params.get('command') + '"')
-            RuntimeUtils.info('Remote response below as follows:')
+            RuntimeUtils.info('Executing command: "' + self.params.get('command') + '"',
+                              format=self.params.get('output-format', 'text'))
+            RuntimeUtils.info('Remote response below as follows:',
+                              format=self.params.get('output-format', 'text'))
         response = self.ssh.execute(self.params.get('command'))
 
         # Output "frame" only during verbose mode (default)
-        if not 'quiet' in self.params.keys():
+        if not 'quiet' in self.params.keys() and self.params.get('output-format', 'text') == 'text':
             print >> sys.stdout, "-" * 80
-        print >> sys.stdout, response
-        if not 'quiet' in self.params.keys():
+
+        if self.params.get('output-format', 'text') == 'xml':
+            RuntimeUtils.info(response or "", format='xml')
+        else:
+            print >> sys.stdout, response
+
+        if not 'quiet' in self.params.keys() and self.params.get('output-format', 'text') == 'text':
             print >> sys.stdout, "-" * 80
+
 
 
 class RuntimeUtils:
@@ -632,6 +649,14 @@ class RuntimeUtils:
         Returns True if user is root.
         """
         return getpass.getuser() == 'root'
+
+
+    @classmethod
+    def get_event_time(self):
+        """
+        Format a time for an event, usually used in XML messages.
+        """
+        return time.strftime('%Y.%m.%d %T', time.localtime())
 
 
     @classmethod
@@ -657,8 +682,9 @@ class RuntimeUtils:
         print >> sys.stderr, "\t--command=\"<command>\"\t\tCustom command to be executed on the target machine.\n" \
             + "\t\t\t\t\tPlease escape quote and/or double-quote inside, if required."
         print >> sys.stderr, "\t--tunneling=<yes|no>\t\tEnable or disable tunneling."
+        print >> sys.stderr, "\t--output-format=<xml|text>\tOutput format. Default is \"text\"."
         print >> sys.stderr, "\t--safe\t\t\t\tMake a backup copy of previous configuration."
-        print >> sys.stderr, "\t--quiet\t\t\t\tProduce no output at all except occurred errors and command result.\n"
+        print >> sys.stderr, "\t--quiet\t\t\t\tProduce no output at all except occurred errors and command result."
         print >> sys.stderr, "\t--help\t\t\t\tDisplays this message.\n\n"
         print >> sys.stderr, "Environment variables:"
         print >> sys.stderr, "\tSSH_REMOTE_PASSWORD\t\tPassword on the remote machine to the calling user.\n"
@@ -667,26 +693,27 @@ class RuntimeUtils:
 
 
     @classmethod
-    def error(self, error_message):
-        """
-        Display an error message.
-        """
-        if error_message:
-            print >> sys.stderr, "Error:\n\t%s\n" % error_message
-
-        sys.exit(1)
-
-
-    @classmethod
-    def info(self, msg, output=sys.stdout):
-        print >> output, "INFO:\t\t%s" % msg
+    def info(self, msg, output=sys.stdout, format='text', type='INFO'):
+        typemap = {
+            'INFO' : 'success',
+            'WARNING' : 'warning',
+            'ERROR' : 'failure',
+            }
+        if format == 'xml':
+            print >> output, "    <message type=\"%s\" time=\"%s\"><![CDATA[%s]]></message>" % (typemap[type], RuntimeUtils.get_event_time(), msg)
+        else:
+            print >> output, "%s:\t\t%s" % (type, msg)
         output.flush()
 
 
     @classmethod
-    def warning(self, msg, output=sys.stdout):
-        print >> output, "WARNING:\t%s" % msg
-        output.flush()
+    def warning(self, msg, output=sys.stdout, format='text'):
+        RuntimeUtils.info(msg, output=output, format=format, type='WARNING')
+
+
+    @classmethod
+    def error(self, msg, output=sys.stdout, format='text'):
+        RuntimeUtils.info(msg, output=output, format=format, type='ERROR')
 
 
     @classmethod
@@ -699,12 +726,6 @@ class RuntimeUtils:
             for p in ['activation-keys', 'command', 'tunneling']:
                 if p in params.keys():
                     return True
-
-
-    @classmethod
-    def error(self, msg, output=sys.stdout):
-        print >> output, "ERROR:\t\t%s" % msg
-        output.flush()
 
 
     @classmethod
@@ -722,7 +743,7 @@ class RuntimeUtils:
             elif arg.find("=") > -1:
                 k, v = arg.split("=", 1)
                 params[k[2:]] = v
-
+            
         return params
 
 
@@ -733,10 +754,21 @@ if __name__ == "__main__":
         RuntimeUtils.header()
         RuntimeUtils.usage()
     else:
+        # How to output
+        if params.get('output-format') and params.get('output-format') not in ['xml', 'text']:
+            RuntimeUtils.header()
+            RuntimeUtils.error("How to speak in %sanese?\n" % params.get('output-format').title())
+            sys.exit(1)
+
+        if params.get('output-format', 'text') == 'xml':
+            print >> sys.stdout, '<?xml version="1.0" encoding="utf-8"?>\n<log>\n  <meta/>\n  <messages>'
+
         try:
             task_push = TaskPush(params)
             task_push.prepare()
             task_push.perform()
         except Exception, ex:
-            RuntimeUtils.error(str(ex))
+            RuntimeUtils.error(str(ex), format=params.get('output-format', 'text'))
 
+        if params.get('output-format', 'text') == 'xml':
+            print >> sys.stdout, "  </messages>\n</log>"
