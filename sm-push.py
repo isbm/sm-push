@@ -261,11 +261,12 @@ class PushEnvironment:
         Deploy public key on the target machine.
         Require console password input.
         """
-
-        print >> sys.stdout, "REQUEST:\t",
-        sys.stdout.flush()
+        if not os.environ.get('SSH_REMOTE_PASSWORD'):
+            print >> sys.stdout, "REQUEST:\t",
+            sys.stdout.flush()
         msg = "Enter login password to %s\n\t\tas user '%s': " % (self.target_host, getpass.getuser())
-        SSH(self.target_host, getpass.getpass(msg), user=getpass.getuser(), port=self.target_port).deploy_identity()
+        SSH(self.target_host, os.environ.get('SSH_REMOTE_PASSWORD') or getpass.getpass(msg),
+            user=getpass.getuser(), port=self.target_port).deploy_identity()
 
 
     def verify_keychain(self):
@@ -658,7 +659,9 @@ class RuntimeUtils:
         print >> sys.stderr, "\t--tunneling=<yes|no>\t\tEnable or disable tunneling."
         print >> sys.stderr, "\t--safe\t\t\t\tMake a backup copy of previous configuration."
         print >> sys.stderr, "\t--quiet\t\t\t\tProduce no output at all except occurred errors and command result.\n"
-        print >> sys.stderr, "\t--help\t\t\t\tDisplays this message.\n"
+        print >> sys.stderr, "\t--help\t\t\t\tDisplays this message.\n\n"
+        print >> sys.stderr, "Environment variables:"
+        print >> sys.stderr, "\tSSH_REMOTE_PASSWORD\t\tPassword on the remote machine to the calling user.\n"
 
         sys.exit(1)
 
