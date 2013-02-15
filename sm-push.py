@@ -393,7 +393,8 @@ class TaskPush:
             # Check if tunneling is on the remote, since user is not asking for it.
             if self.is_tunnel_enabled == None:
                 self._do_tunneling(check_only=True)
-            RuntimeUtils.info("Tunnel is %s." % (self.is_tunnel_enabled and 'enabled' or 'disabled'))
+            if 'quiet' not in self.params.keys():
+                RuntimeUtils.info("Tunnel is %s." % (self.is_tunnel_enabled and 'enabled' or 'disabled'))
 
         # Register, if requested
         if 'activation-keys' in self.params.keys():
@@ -425,31 +426,40 @@ class TaskPush:
                 if self.ssh.execute('test -e /usr/bin/sm-client && echo "installed" || echo "failed"') == 'failed':
                     raise Exception("SM Client installation failed. :-(")
                 else:
-                    RuntimeUtils.info("SM Client has been installed")
+                    if 'quiet' not in self.params.keys():
+                        RuntimeUtils.info("SM Client has been installed")
             else:
-                RuntimeUtils.info('SM Client is already installed')
+                if 'quiet' not in self.params.keys():
+                    RuntimeUtils.info('SM Client is already installed')
 
             # Get SSL certificate fingerprint
             ssl_fp = os.popen("/usr/bin/openssl x509 -noout -in %s -fingerprint" % ssl_certificate).read().split('=')[-1].strip()
             if not 'quiet' in self.params.keys():
-                remote_tmp_logfile = '/tmp/.sm-client-tools.%s.%s.log' % (time.strftime('%Y%m%d.%H%M%S.backup', time.localtime()), random.randint(0xff, 0xffff))
                 RuntimeUtils.info("SSL certificate: %s" % ssl_fp)
 
-                # Register machine
-                overrides = []
-                if self.is_tunnel_enabled:
-                    overrides.append('--cfg=noSSLServerURL,http://%s:%s/' % (self.localhostname, self.tunnel.http_port))
-                    overrides.append('--cfg=serverURL,https://%s:%s/XMLRPC' % (self.localhostname, self.tunnel.https_port))
-                self.ssh.execute("/usr/bin/sudo -n /usr/bin/sm-client --output-format=xml --hostname=%s --activation-keys=%s --ssl-fingerprint=%s %s > %s" %
-                                 (self.localhostname, self.params['activation-keys'], ssl_fp, ' '.join(overrides), remote_tmp_logfile))
-                smc_out = SMClientOutput(self.ssh.execute("test -e %s && /bin/cat %s && rm %s || echo '<?xml version=\"1.0\" encoding=\"UTF-8\"?><log/>'" % 
-                                                          (remote_tmp_logfile, remote_tmp_logfile, remote_tmp_logfile)))
+            # If we need sudo, we need to know it is there and we have right permissions
+            if getpass.getuser() != 'root':
+                if self.ssh.execute("test -e /usr/bin/sudo && echo 'OK'") != 'OK':
+                    raise Exception("You cannot run anything on \"%s\" as \"%s\" without sudo installed!" % (self.hostname, getpass.getuser()))
+                if self.ssh.execute("/usr/bin/sudo -S true < /dev/null &>/dev/null && echo 'OK'") != 'OK':
+                    raise Exception("Not enough privileges for user \"%s\" on \"%s\" node." % (getpass.getuser(), self.hostname))
+
+            # Register machine
+            remote_tmp_logfile = '/tmp/.sm-client-tools.%s.%s.log' % (time.strftime('%Y%m%d.%H%M%S.backup', time.localtime()), random.randint(0xff, 0xffff))
+            overrides = []
+            if self.is_tunnel_enabled:
+                overrides.append('--cfg=noSSLServerURL,http://%s:%s/' % (self.localhostname, self.tunnel.http_port))
+                overrides.append('--cfg=serverURL,https://%s:%s/XMLRPC' % (self.localhostname, self.tunnel.https_port))
+            self.ssh.execute("/usr/bin/sudo -n /usr/bin/sm-client --output-format=xml --hostname=%s --activation-keys=%s --ssl-fingerprint=%s %s > %s" %
+                             (self.localhostname, self.params['activation-keys'], ssl_fp, ' '.join(overrides), remote_tmp_logfile))
+            smc_out = SMClientOutput(self.ssh.execute("test -e %s && /bin/cat %s && rm %s || echo '<?xml version=\"1.0\" encoding=\"UTF-8\"?><log/>'" % 
+                                                      (remote_tmp_logfile, remote_tmp_logfile, remote_tmp_logfile)))
             if smc_out.events.get(SMClientOutput.ERROR):
                 RuntimeUtils.warning("Remote machine was not happy:")
                 for error_message in smc_out.events.get(SMClientOutput.ERROR):
                     RuntimeUtils.error(error_message)
                 raise Exception("Registration failed. Please login to the %s and find out why." % self.hostname)
-            elif smc_out.events.get(SMClientOutput.WARNING):
+            elif smc_out.events.get(SMClientOutput.WARNING) and not 'quiet' in self.params.keys():
                 for warning_message in smc_out.events.get(SMClientOutput.WARNING):
                     RuntimeUtils.warning(self.hostname + ": " + warning_message)
             # No success blah-blah-blah here.
@@ -457,7 +467,8 @@ class TaskPush:
             # Solaris fans, do it yourself. :-)
             raise Exception('I cannot register %s against SUSE Manager as of today.')
 
-        RuntimeUtils.info("Remote machine %s has been registered successfully." % self.hostname)
+        if 'quiet' not in self.params.keys():
+            RuntimeUtils.info("Remote machine %s has been registered successfully." % self.hostname)
 
 
     def _do_tunneling(self, check_only=False):
@@ -602,9 +613,11 @@ class TaskPush:
             RuntimeUtils.info('Remote response below as follows:')
         response = self.ssh.execute(self.params.get('command'))
 
+        # Output "frame" only during verbose mode (default)
         if not 'quiet' in self.params.keys():
             print >> sys.stdout, "-" * 80
-            print >> sys.stdout, response
+        print >> sys.stdout, response
+        if not 'quiet' in self.params.keys():
             print >> sys.stdout, "-" * 80
 
 
@@ -644,7 +657,7 @@ class RuntimeUtils:
             + "\t\t\t\t\tPlease escape quote and/or double-quote inside, if required."
         print >> sys.stderr, "\t--tunneling=<yes|no>\t\tEnable or disable tunneling."
         print >> sys.stderr, "\t--safe\t\t\t\tMake a backup copy of previous configuration."
-        print >> sys.stderr, "\t--quiet\t\t\t\tProduce no output at all except occurred errors.\n"
+        print >> sys.stderr, "\t--quiet\t\t\t\tProduce no output at all except occurred errors and command result.\n"
         print >> sys.stderr, "\t--help\t\t\t\tDisplays this message.\n"
 
         sys.exit(1)
