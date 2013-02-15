@@ -440,7 +440,7 @@ class TaskPush:
                 if self.is_tunnel_enabled:
                     overrides.append('--cfg=noSSLServerURL,http://%s:%s/' % (self.localhostname, self.tunnel.http_port))
                     overrides.append('--cfg=serverURL,https://%s:%s/XMLRPC' % (self.localhostname, self.tunnel.https_port))
-                print self.ssh.execute("/usr/bin/sudo -n /usr/bin/sm-client --output-format=xml --hostname=%s --activation-keys=%s --ssl-fingerprint=%s %s > %s" %
+                self.ssh.execute("/usr/bin/sudo -n /usr/bin/sm-client --output-format=xml --hostname=%s --activation-keys=%s --ssl-fingerprint=%s %s > %s" %
                                  (self.localhostname, self.params['activation-keys'], ssl_fp, ' '.join(overrides), remote_tmp_logfile))
                 smc_out = SMClientOutput(self.ssh.execute("test -e %s && /bin/cat %s && rm %s || echo '<?xml version=\"1.0\" encoding=\"UTF-8\"?><log/>'" % 
                                                           (remote_tmp_logfile, remote_tmp_logfile, remote_tmp_logfile)))
@@ -525,7 +525,6 @@ class TaskPush:
         self.ssh.push_file(tmppth, remote_hosts_pth)
 
         # Push failed?
-        print repr((self.ssh.execute("test -e %s && echo 'OK' || echo '%s'" % (remote_hosts_pth, token)) + "").strip())
         if (self.ssh.execute("test -e %s && echo 'OK' || echo '%s'" % (remote_hosts_pth, token)) + "").strip() != 'OK':
             raise Exception('Unable to send new configuration to "%s" node.' % self.hostname)
 
