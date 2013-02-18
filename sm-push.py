@@ -439,15 +439,13 @@ class TaskPush:
                 RuntimeUtils.info("SSL certificate: %s" % ssl_fp, format=self.params.get('output-format', 'text'))
 
             # If we need sudo, we need to know it is there
-            if self.ssh.execute("test -e /usr/bin/sudo && echo 'OK'") != 'OK':
-                if getpass.getuser() != 'root':
+            if getpass.getuser() != 'root':
+                if self.ssh.execute("test -e /usr/bin/sudo && echo 'OK'") != 'OK':
                     raise Exception("You cannot run anything on \"%s\" as \"%s\" without sudo installed!" % (self.hostname, getpass.getuser()))
-                else:
-                    raise Exception("You cannot register \"%s\" without sudo installed!" % (self.hostname))
 
-            # Check if we have permissions
-            if self.ssh.execute("/usr/bin/sudo -S true < /dev/null &>/dev/null && echo 'OK'") != 'OK':
-                raise Exception("Not enough privileges for user \"%s\" on \"%s\" node." % (getpass.getuser(), self.hostname))
+                # Check if we have permissions
+                if self.ssh.execute("/usr/bin/sudo -S true < /dev/null &>/dev/null && echo 'OK'") != 'OK':
+                    raise Exception("Not enough privileges for user \"%s\" on \"%s\" node." % (getpass.getuser(), self.hostname))
 
             # Register machine
             remote_tmp_logfile = '/tmp/.sm-client-tools.%s.%s.log' % (time.strftime('%Y%m%d.%H%M%S.backup', time.localtime()), random.randint(0xff, 0xffff))
@@ -455,8 +453,9 @@ class TaskPush:
             if self.is_tunnel_enabled:
                 overrides.append('--cfg=noSSLServerURL,http://%s:%s/' % (self.localhostname, self.tunnel.http_port))
                 overrides.append('--cfg=serverURL,https://%s:%s/XMLRPC' % (self.localhostname, self.tunnel.https_port))
-            self.ssh.execute("/usr/bin/sudo -n /usr/bin/sm-client --output-format=xml --hostname=%s --activation-keys=%s --ssl-fingerprint=%s %s > %s" %
-                             (self.localhostname, self.params['activation-keys'], ssl_fp, ' '.join(overrides), remote_tmp_logfile))
+            prefix = getpass.getuser() != 'root' and "/usr/bin/sudo -n " or ""
+            self.ssh.execute("%s/usr/bin/sm-client --output-format=xml --hostname=%s --activation-keys=%s --ssl-fingerprint=%s %s > %s" %
+                             (prefix, self.localhostname, self.params['activation-keys'], ssl_fp, ' '.join(overrides), remote_tmp_logfile))
             smc_out = SMClientOutput(self.ssh.execute("test -e %s && /bin/cat %s && rm %s || echo '<?xml version=\"1.0\" encoding=\"UTF-8\"?><log/>'" % 
                                                       (remote_tmp_logfile, remote_tmp_logfile, remote_tmp_logfile)))
             if smc_out.events.get(SMClientOutput.ERROR):
