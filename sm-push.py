@@ -577,7 +577,11 @@ class TaskPush:
         if self.environ.target_os.lower() == 'linux':
             for service_name, service_exec in [('OSAD client-side', '/etc/init.d/osad'),
                                                ('Red Hat Network update query', '/etc/init.d/rhnsd'),]:
-                if self.ssh.execute('test -e %s && %s %s || echo "absent"' %(service_exec, service_exec, (enable and 'start' or 'stop'))) != 'absent':
+                if self.ssh.execute('test -e %s && %s %s;chkconfig %s %s || echo "absent"' %(service_exec, 
+                                                                                             service_exec, 
+                                                                                             (enable and 'start' or 'stop'),
+                                                                                             (enable and '-a' or '-d'),
+                                                                                             service_exec.split('/')[-1])) != 'absent':
                     RuntimeUtils.info('%s %s service' % ((enable and 'Enabling' or 'Stopping'), service_name),
                                       format=self.params.get('output-format', 'text'))
         else:
@@ -705,7 +709,7 @@ class RuntimeUtils:
         if format == 'xml':
             print >> output, "    <message type=\"%s\" time=\"%s\"><![CDATA[%s]]></message>" % (typemap[type], RuntimeUtils.get_event_time(), msg)
         else:
-            print >> output, "%s:\t\t%s" % (type, msg)
+            print >> output, "%s:\t%s" % (type, (type != 'WARNING' and '\t' or '') +msg)
         output.flush()
 
 
