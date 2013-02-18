@@ -1,4 +1,4 @@
-#!/use/bin/python
+#!/usr/bin/python
 #
 # Author: Bo Maryniuk <bo@suse.de>
 #
@@ -466,7 +466,7 @@ class TaskPush:
             # No success blah-blah-blah here.
         else:
             # Solaris fans, do it yourself. :-)
-            raise Exception('I cannot register %s against SUSE Manager as of today.')
+            raise Exception('I cannot register %s against SUSE Manager as of today.' % self.environ.target_os)
 
         if 'quiet' not in self.params.keys():
             RuntimeUtils.info("Remote machine %s has been registered successfully." % self.hostname, format=self.params.get('output-format', 'text'))
