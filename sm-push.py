@@ -438,12 +438,16 @@ class TaskPush:
             if not 'quiet' in self.params.keys():
                 RuntimeUtils.info("SSL certificate: %s" % ssl_fp, format=self.params.get('output-format', 'text'))
 
-            # If we need sudo, we need to know it is there and we have right permissions
-            if getpass.getuser() != 'root':
-                if self.ssh.execute("test -e /usr/bin/sudo && echo 'OK'") != 'OK':
+            # If we need sudo, we need to know it is there
+            if self.ssh.execute("test -e /usr/bin/sudo && echo 'OK'") != 'OK':
+                if getpass.getuser() != 'root':
                     raise Exception("You cannot run anything on \"%s\" as \"%s\" without sudo installed!" % (self.hostname, getpass.getuser()))
-                if self.ssh.execute("/usr/bin/sudo -S true < /dev/null &>/dev/null && echo 'OK'") != 'OK':
-                    raise Exception("Not enough privileges for user \"%s\" on \"%s\" node." % (getpass.getuser(), self.hostname))
+                else:
+                    raise Exception("You cannot register \"%s\" without sudo installed!" % (self.hostname))
+
+            # Check if we have permissions
+            if self.ssh.execute("/usr/bin/sudo -S true < /dev/null &>/dev/null && echo 'OK'") != 'OK':
+                raise Exception("Not enough privileges for user \"%s\" on \"%s\" node." % (getpass.getuser(), self.hostname))
 
             # Register machine
             remote_tmp_logfile = '/tmp/.sm-client-tools.%s.%s.log' % (time.strftime('%Y%m%d.%H%M%S.backup', time.localtime()), random.randint(0xff, 0xffff))
